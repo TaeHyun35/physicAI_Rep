@@ -2,6 +2,8 @@
 에코소트 전처리 설정.
 경로, 클래스, 공개 데이터 매핑, 전처리 파라미터를 한 곳에서 관리한다.
 """
+from __future__ import annotations
+
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -20,6 +22,18 @@ PRE_CONFIG_PATH = DATA_DIR / "pre_config.json" # 현장에서 조정한 전처�
 DEBUG_DIR = ROOT / "debug"                     # 단계별 시각화 결과
 
 OWN_SETS = ["train_pool", "test", "confuse"]
+
+# 읽어 들일 이미지 확장자. 대소문자는 구분하지 않는다 (Colab·Jetson 같은 Linux에서 .JPG도 읽기 위함)
+IMAGE_EXTS = (".jpg", ".jpeg", ".png")
+
+
+def list_images(folder: Path, recursive: bool = False) -> list:
+    """폴더 안의 이미지 파일 목록 (확장자 대소문자 무시, 이름순)."""
+    folder = Path(folder)
+    if not folder.exists():
+        return []
+    it = folder.rglob("*") if recursive else folder.iterdir()
+    return sorted(p for p in it if p.is_file() and p.suffix.lower() in IMAGE_EXTS)
 
 # ---------------------------------------------------------------------------
 # 2. 클래스

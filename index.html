@@ -1,231 +1,863 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <!-- 브라우저 탭에 보이는 제목 -->
-  <title>[제품 이름] | 나만의 피지컬 AI</title>
-  <meta name="description" content="[제품 한 줄 소개]">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="에코소트: 엣지 AI 재활용품 자동 분류기의 전처리·후처리 기법과 파이프라인 소개">
+<title>EcoSort 기법 노트</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Geist:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap">
+<style>
+[hidden] { display: none !important; }
+img { max-width: 100%; }
+/* Layout: 상단 HUD 바 + 탭 3개(프로젝트 / 전처리·후처리 / 파이프라인). 라이트박스를 위에서 내려다본 HUD 화면이 첫 장면.
+   디자인 시스템: stitch_project_prototype_definition/DESIGN.md (슬레이트 + 에메랄드/시안/앰버, 4px 각진 모서리) */
+:root {
+  color-scheme: dark;
+  --bg: #0b1326;
+  --panel: #131b2e;
+  --panel-2: #1b2438;
+  --line: rgba(218, 226, 253, 0.10);
+  --line-strong: rgba(218, 226, 253, 0.18);
+  --fg: #dae2fd;
+  --muted: #9aa8c4;
+  --primary: #4edea3;      /* 정상·확정·재활용 */
+  --primary-ink: #003824;
+  --secondary: #4cd7f6;    /* 센서·측정값·박스 */
+  --tertiary: #ffb95f;     /* 확인 필요·저신뢰·경고 */
+  --danger: #ff8a80;
+  --glow: rgba(78, 222, 163, 0.28);
+  --f-display: "Space Grotesk", "IBM Plex Sans KR", system-ui, sans-serif;
+  --f-body: "Geist", "IBM Plex Sans KR", system-ui, sans-serif;
+  --f-mono: "JetBrains Mono", "IBM Plex Sans KR", ui-monospace, monospace;
+  --r: 4px;
+  --r-card: 8px;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+    --bg: #f3f6fa; --panel: #ffffff; --panel-2: #eaf0f6;
+    --line: rgba(15, 23, 42, 0.10); --line-strong: rgba(15, 23, 42, 0.20);
+    --fg: #0f172a; --muted: #4b5a73;
+    --primary: #047857; --primary-ink: #ffffff; --secondary: #0e7490; --tertiary: #b45309; --danger: #b91c1c;
+    --glow: rgba(4, 120, 87, 0.18);
+  }
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f3f6fa; --panel: #ffffff; --panel-2: #eaf0f6;
+  --line: rgba(15, 23, 42, 0.10); --line-strong: rgba(15, 23, 42, 0.20);
+  --fg: #0f172a; --muted: #4b5a73;
+  --primary: #047857; --primary-ink: #ffffff; --secondary: #0e7490; --tertiary: #b45309; --danger: #b91c1c;
+  --glow: rgba(4, 120, 87, 0.18);
+}
 
-  <!-- 글꼴: Pretendard -->
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--fg);
+  font: 15px/1.65 var(--f-body); -webkit-font-smoothing: antialiased;
+}
+a { color: var(--secondary); text-underline-offset: 3px; }
+a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible {
+  outline: 2px solid var(--secondary); outline-offset: 2px;
+}
+h1, h2, h3 { font-family: var(--f-display); text-wrap: balance; margin: 0; letter-spacing: -0.015em; }
+h1 { font-size: clamp(30px, 5vw, 46px); line-height: 1.15; font-weight: 700; }
+h2 { font-size: clamp(22px, 3vw, 28px); line-height: 1.25; font-weight: 600; }
+h3 { font-size: 17px; line-height: 1.35; font-weight: 600; }
+p { margin: 0; }
+.mono { font-family: var(--f-mono); font-variant-numeric: tabular-nums; }
+.label {
+  font-family: var(--f-mono); font-size: 11px; font-weight: 500; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--muted);
+}
+.muted { color: var(--muted); }
+.wrap { max-width: 1120px; margin: 0 auto; padding-inline: 20px; }
 
-  <style>
-    /* ===== 색상 설정: 이 값만 바꿔도 전체 분위기가 바뀝니다 ===== */
-    :root {
-      --bg: #F5F6F3;       /* 배경 */
-      --ink: #1E2422;      /* 기본 글자 */
-      --muted: #5E6764;    /* 보조 글자 */
-      --line: #D5D9D4;     /* 구분선 */
-      --accent: #F5C518;   /* 강조 색 */
-      --surface: #FFFFFF;  /* 이미지 영역 등 */
-    }
+/* ── 상단 바 ─────────────────────────────── */
+.top {
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 10;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(12px); border-bottom: 1px solid var(--line);
+}
+.top .wrap { display: flex; align-items: center; gap: 16px 24px; flex-wrap: wrap; padding-block: 12px; }
+.brand { display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--fg); }
+.brand-mark {
+  width: 28px; height: 28px; border-radius: var(--r); border: 1.5px solid var(--primary);
+  display: grid; place-items: center; position: relative;
+}
+.brand-mark::after { content: ""; width: 10px; height: 10px; background: var(--primary); border-radius: 2px; }
+.brand b { font-family: var(--f-display); font-size: 17px; letter-spacing: 0.01em; }
+.brand small { display: block; font-family: var(--f-mono); font-size: 10px; color: var(--muted); letter-spacing: 0.06em; }
+nav.tabs { display: flex; gap: 4px; flex-wrap: wrap; margin-left: auto; }
+nav.tabs a {
+  font-family: var(--f-mono); font-size: 12.5px; font-weight: 500; text-decoration: none;
+  color: var(--muted); padding: 7px 12px; border-radius: var(--r); border: 1px solid transparent;
+  transition: color .2s, background-color .2s, border-color .2s;
+}
+nav.tabs a:hover { color: var(--fg); background: var(--panel-2); }
+nav.tabs a[aria-current="page"] { color: var(--primary); border-color: var(--primary); background: var(--glow); }
+.theme-btn {
+  font-family: var(--f-mono); font-size: 11px; color: var(--muted); background: transparent;
+  border: 1px solid var(--line-strong); border-radius: var(--r); padding: 6px 10px; cursor: pointer;
+}
+.theme-btn:hover { color: var(--fg); }
 
-    * { box-sizing: border-box; margin: 0; padding: 0; }
+/* ── 공통 블록 ─────────────────────────────── */
+main { padding-block: 40px 72px; }
+.view { display: grid; gap: 64px; }
+.view[hidden] { display: none !important; }
+section { display: grid; gap: 22px; }
+.sec-head { display: grid; gap: 8px; max-width: 68ch; }
+.sec-head p { color: var(--muted); }
+.panel {
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-card);
+  padding: 20px; min-width: 0;
+}
+.grid { display: grid; gap: 14px; }
+.g2 { grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); }
+.g3 { grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); }
+.g4 { grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); }
+.chip {
+  display: inline-flex; align-items: center; gap: 6px; font-family: var(--f-mono); font-size: 11px; font-weight: 500;
+  letter-spacing: 0.04em; padding: 3px 8px; border-radius: var(--r); border: 1px solid currentColor;
+  white-space: nowrap;
+}
+.chip.ok { color: var(--primary); background: color-mix(in srgb, var(--primary) 10%, transparent); }
+.chip.info { color: var(--secondary); background: color-mix(in srgb, var(--secondary) 10%, transparent); }
+.chip.warn { color: var(--tertiary); background: color-mix(in srgb, var(--tertiary) 10%, transparent); }
+.chip.off { color: var(--muted); }
+.dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.pulse { animation: pulse 1.8s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .35; } }
 
-    body {
-      font-family: "Pretendard", -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
-      background: var(--bg);
-      color: var(--ink);
-      line-height: 1.7;
-      word-break: keep-all;
-    }
+/* 페이지 전환 등장: 보이는 상태에서 살짝 떠오르기만 한다 */
+.view:not([hidden]) > * { animation: rise .55s cubic-bezier(.2,.7,.2,1) both; }
+.view:not([hidden]) > *:nth-child(2) { animation-delay: .06s; }
+.view:not([hidden]) > *:nth-child(3) { animation-delay: .12s; }
+.view:not([hidden]) > *:nth-child(4) { animation-delay: .18s; }
+.view:not([hidden]) > *:nth-child(n+5) { animation-delay: .24s; }
+@keyframes rise { from { transform: translateY(10px); opacity: .4; } to { transform: none; opacity: 1; } }
 
-    img { max-width: 100%; display: block; }
-    a { color: inherit; }
-    a:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+/* ── 1. 프로젝트 ─────────────────────────────── */
+.hero { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 36px; align-items: center; }
+.hero-copy { display: grid; gap: 18px; }
+.hero-copy .lead { font-size: 17px; color: var(--muted); max-width: 52ch; }
+.hero-copy h1 em { font-style: normal; color: var(--primary); }
+.status-row { display: flex; flex-wrap: wrap; gap: 8px; }
 
-    .wrap { max-width: 1040px; margin: 0 auto; padding: 0 24px; }
+.hud {
+  position: relative; aspect-ratio: 16 / 10; max-width: 100%; border-radius: var(--r-card); overflow: hidden;
+  border: 1px solid var(--line-strong); background: var(--panel);
+}
+.hud svg { display: block; width: 100%; height: 100%; }
+.hud .scan {
+  position: absolute; left: 0; right: 0; height: 2px; top: 12%;
+  background: linear-gradient(90deg, transparent, var(--primary), transparent);
+  box-shadow: 0 0 12px var(--primary); opacity: .75; animation: scan 3.6s ease-in-out infinite;
+}
+@keyframes scan { 0% { top: 12%; } 50% { top: 86%; } 100% { top: 12%; } }
+.hud-top, .hud-bottom {
+  position: absolute; left: 10px; right: 10px; display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap;
+  font-family: var(--f-mono); font-size: 10.5px; color: var(--muted);
+}
+.hud-top { top: 10px; } .hud-bottom { bottom: 10px; }
+.hud-top span, .hud-bottom span {
+  background: color-mix(in srgb, var(--bg) 80%, transparent); padding: 3px 7px; border-radius: var(--r);
+}
 
-    /* ----- 상단 메뉴 ----- */
-    header { border-bottom: 1px solid var(--line); }
-    .nav {
-      display: flex; justify-content: space-between; align-items: center;
-      height: 64px;
-    }
-    .logo { font-weight: 800; font-size: 1.1rem; text-decoration: none; }
-    .nav ul { display: flex; gap: 24px; list-style: none; }
-    .nav ul a { text-decoration: none; color: var(--muted); font-size: 0.95rem; }
-    .nav ul a:hover { color: var(--ink); }
+.flow { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+.flow .step { display: grid; gap: 6px; align-content: start; position: relative; }
+.flow .step .label { color: var(--secondary); }
+.flow .step p { font-size: 14px; color: var(--muted); }
 
-    /* ----- 첫 화면 ----- */
-    .hero {
-      display: grid; grid-template-columns: 1fr 1fr; gap: 48px;
-      align-items: center; padding: 88px 0;
-    }
-    .hero h1 {
-      font-size: clamp(2.6rem, 6vw, 4.2rem);
-      font-weight: 800; line-height: 1.1; letter-spacing: -0.03em;
-    }
-    .hero .tagline { margin-top: 20px; font-size: 1.2rem; color: var(--muted); max-width: 30em; }
-    .button {
-      display: inline-block; margin-top: 32px; padding: 14px 26px;
-      background: var(--ink); color: var(--bg);
-      text-decoration: none; font-weight: 600; border-radius: 999px;
-    }
-    .button:hover { background: #000; }
+.bins { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+.bin { border: 1px solid var(--line); border-radius: var(--r-card); padding: 14px; display: grid; gap: 6px; background: var(--panel); }
+.bin .k { font-family: var(--f-mono); font-size: 11px; color: var(--muted); }
+.bin b { font-family: var(--f-display); font-size: 18px; }
+.bin p { font-size: 13px; color: var(--muted); }
+.bin.ok { border-color: color-mix(in srgb, var(--primary) 45%, transparent); }
+.bin.warn { border-color: color-mix(in srgb, var(--tertiary) 55%, transparent); }
+.bin.warn b { color: var(--tertiary); }
 
-    /* 제품 이미지 자리: 이미지를 넣으면 회색 안내 문구 대신 사진이 보입니다 */
-    .product-shot {
-      background: var(--accent);
-      border-radius: 24px;
-      padding: 28px;
-    }
-    .product-shot .frame {
-      aspect-ratio: 4 / 3;
-      background: var(--surface);
-      border-radius: 12px;
-      display: flex; align-items: center; justify-content: center;
-      color: var(--muted); text-align: center; overflow: hidden;
-    }
-    .product-shot .frame img { width: 100%; height: 100%; object-fit: cover; }
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr)); gap: 10px; }
+.kpi { padding: 16px; border-radius: var(--r-card); background: var(--panel); border: 1px solid var(--line); display: grid; gap: 4px; }
+.kpi .v { font-family: var(--f-display); font-size: 28px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.kpi .v small { font-size: 14px; color: var(--muted); margin-left: 2px; }
+.kpi p { font-size: 13px; color: var(--muted); }
 
-    /* ----- 공통 섹션 ----- */
-    section.block { padding: 80px 0; border-top: 1px solid var(--line); }
-    section.block h2 { font-size: 1.9rem; font-weight: 800; letter-spacing: -0.02em; margin-bottom: 16px; }
-    section.block .lead { color: var(--muted); max-width: 36em; font-size: 1.05rem; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+.table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--r-card); background: var(--panel); }
+th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-family: var(--f-mono); font-size: 11px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); background: var(--panel-2); }
+tr:last-child td { border-bottom: 0; }
+td.num { font-family: var(--f-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
 
-    /* ----- 작동 방식: 감지 → 판단 → 행동 ----- */
-    .flow {
-      display: grid; grid-template-columns: repeat(3, 1fr); gap: 0;
-      margin-top: 40px; list-style: none; counter-reset: step;
-    }
-    .flow li {
-      padding: 0 28px 0 0; position: relative; counter-increment: step;
-    }
-    .flow li::before {
-      content: counter(step);
-      display: flex; align-items: center; justify-content: center;
-      width: 40px; height: 40px; margin-bottom: 18px;
-      border-radius: 50%; background: var(--accent);
-      font-weight: 800;
-    }
-    /* 단계 사이 연결선 */
-    .flow li:not(:last-child)::after {
-      content: ""; position: absolute; top: 20px; left: 52px; right: 12px;
-      height: 2px; background: var(--line);
-    }
-    .flow h3 { font-size: 1.2rem; margin-bottom: 6px; }
-    .flow p { color: var(--muted); }
+/* 진행 상황 */
+.progress { display: grid; gap: 10px; }
+.prog-item { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 14px; align-items: start; padding: 12px 0; border-bottom: 1px dashed var(--line); }
+.prog-item:last-child { border-bottom: 0; }
 
-    /* ----- 주요 기능 ----- */
-    .features { margin-top: 40px; list-style: none; }
-    .features li {
-      display: grid; grid-template-columns: 220px 1fr; gap: 24px;
-      padding: 24px 0; border-bottom: 1px solid var(--line);
-    }
-    .features li:first-child { border-top: 1px solid var(--line); }
-    .features h3 { font-size: 1.15rem; }
-    .features p { color: var(--muted); }
+/* ── 2. 기법 ─────────────────────────────── */
+.principles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr)); gap: 10px; }
+.pr { padding: 14px; border-radius: var(--r-card); border: 1px solid var(--line); background: var(--panel); display: grid; gap: 6px; }
+.pr .mono { color: var(--primary); font-size: 12px; }
+.pr b { font-size: 14.5px; }
+.pr p { font-size: 13px; color: var(--muted); }
 
-    /* ----- 만든 사람 / 하단 ----- */
-    footer { border-top: 1px solid var(--line); padding: 40px 0 56px; color: var(--muted); font-size: 0.95rem; }
-    footer .wrap { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+.tech { display: grid; gap: 12px; }
+.tech-card {
+  display: grid; gap: 10px; padding: 18px; border-radius: var(--r-card); border: 1px solid var(--line); background: var(--panel);
+  transition: border-color .2s, transform .2s;
+}
+.tech-card:hover { border-color: color-mix(in srgb, var(--primary) 45%, transparent); transform: translateY(-2px); }
+.tech-card header { display: flex; gap: 10px; align-items: baseline; justify-content: space-between; flex-wrap: wrap; }
+.tech-card .why { font-size: 14px; color: var(--muted); }
+.tech-card .meta { display: flex; gap: 6px; flex-wrap: wrap; }
+.formula {
+  font-family: var(--f-mono); font-size: 13px; padding: 10px 12px; border-radius: var(--r);
+  background: var(--panel-2); border: 1px solid var(--line); overflow-x: auto; white-space: nowrap;
+}
+.formula b { color: var(--primary); font-weight: 600; }
+.cite { font-size: 12.5px; color: var(--muted); }
+.cite a { color: var(--secondary); }
 
-    /* ----- 모바일 화면 ----- */
-    @media (max-width: 760px) {
-      .nav ul { display: none; }
-      .hero { grid-template-columns: 1fr; padding: 56px 0; gap: 36px; }
-      .flow { grid-template-columns: 1fr; gap: 32px; }
-      .flow li::after { display: none; }
-      .features li { grid-template-columns: 1fr; gap: 4px; }
-      section.block { padding: 56px 0; }
-    }
-  </style>
+.subtabs { display: flex; gap: 6px; flex-wrap: wrap; }
+.subtabs button {
+  font-family: var(--f-mono); font-size: 12px; padding: 7px 12px; border-radius: var(--r); cursor: pointer;
+  background: var(--panel); color: var(--muted); border: 1px solid var(--line-strong);
+}
+.subtabs button[aria-selected="true"] { color: var(--bg); background: var(--primary); border-color: var(--primary); }
+
+/* 후처리 시뮬레이터 */
+.sim { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: 16px; }
+.field { display: grid; gap: 6px; }
+.field label { font-size: 13px; color: var(--muted); }
+.field select, .field input[type="range"] { width: 100%; }
+.field select {
+  font: 14px var(--f-body); color: var(--fg); background: var(--panel-2); border: 1px solid var(--line-strong);
+  border-radius: var(--r); padding: 8px 10px;
+}
+input[type="range"] { accent-color: var(--primary); }
+.toggle { display: flex; align-items: center; gap: 10px; font-size: 14px; cursor: pointer; }
+.toggle input { width: 18px; height: 18px; accent-color: var(--secondary); }
+.verdict { display: grid; gap: 14px; align-content: start; }
+.verdict .out { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.verdict .out b { font-family: var(--f-display); font-size: 30px; transition: color .25s; }
+.verdict ol { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 14px; color: var(--muted); }
+.verdict ol li.hit { color: var(--fg); }
+.mini-bins { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+.mini-bins div {
+  font-family: var(--f-mono); font-size: 11px; text-align: center; padding: 10px 2px; border-radius: var(--r);
+  border: 1px solid var(--line); color: var(--muted); transition: all .25s;
+}
+.mini-bins div.on { color: var(--primary-ink); background: var(--primary); border-color: var(--primary); transform: translateY(-3px); }
+.mini-bins div.on.warn { background: var(--tertiary); border-color: var(--tertiary); color: #2a1700; }
+
+/* ── 3. 파이프라인 ─────────────────────────────── */
+.budget { display: grid; gap: 10px; }
+.bar { display: flex; height: 40px; border-radius: var(--r); overflow: hidden; border: 1px solid var(--line-strong); background: var(--panel-2); }
+.bar > div { height: 100%; position: relative; transform-origin: left; animation: grow .9s cubic-bezier(.2,.7,.2,1) both; }
+.bar > div + div { border-left: 1px solid var(--bg); }
+@keyframes grow { from { transform: scaleX(0.2); } to { transform: scaleX(1); } }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: 13px; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+.scale { display: flex; justify-content: space-between; font-family: var(--f-mono); font-size: 11px; color: var(--muted); }
+
+.stages { display: grid; gap: 0; }
+.stage {
+  display: grid; grid-template-columns: 58px minmax(0, 1fr) auto; gap: 14px; align-items: start;
+  padding: 14px 4px; border-bottom: 1px solid var(--line); position: relative;
+}
+.stage:last-child { border-bottom: 0; }
+.stage .id { font-family: var(--f-mono); font-size: 13px; color: var(--primary); padding-top: 1px; }
+.stage .id.cond { color: var(--tertiary); }
+.stage b { font-size: 15px; }
+.stage p { font-size: 13.5px; color: var(--muted); }
+.stage .t { font-family: var(--f-mono); font-size: 12px; color: var(--secondary); white-space: nowrap; text-align: right; }
+.stage-group { font-family: var(--f-mono); font-size: 11px; letter-spacing: .08em; color: var(--muted); padding: 18px 4px 6px; text-transform: uppercase; }
+
+.lane { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); gap: 0; border: 1px solid var(--line); border-radius: var(--r-card); overflow: hidden; background: var(--panel); }
+.lane > div { padding: 14px; display: grid; gap: 4px; border-right: 1px solid var(--line); position: relative; min-width: 0; }
+.lane > div:last-child { border-right: 0; }
+.lane .label { color: var(--secondary); }
+.lane p { font-size: 13px; color: var(--muted); }
+.lane .where { font-family: var(--f-mono); font-size: 10.5px; color: var(--primary); }
+
+.refs { columns: 2 320px; column-gap: 28px; font-size: 13px; color: var(--muted); }
+.refs li { break-inside: avoid; margin-bottom: 8px; }
+footer { border-top: 1px solid var(--line); padding-block: 24px; font-size: 12.5px; color: var(--muted); }
+
+@media (max-width: 860px) {
+  .hero, .sim { grid-template-columns: minmax(0, 1fr); }
+  .flow { grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); }
+  .bins { grid-template-columns: repeat(auto-fit, minmax(min(100%, 140px), 1fr)); }
+  nav.tabs { margin-left: 0; width: 100%; }
+}
+@media (max-width: 520px) {
+  .stage { grid-template-columns: 46px minmax(0, 1fr); }
+  .stage .t { grid-column: 2; text-align: left; }
+  .prog-item { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+  .hud .scan { display: none; }
+}
+</style>
+
 </head>
 <body>
-
-  <!-- ===== 상단 메뉴 ===== -->
-  <header>
-    <nav class="wrap nav">
-      <a class="logo" href="#">[제품 이름]</a>
-      <ul>
-        <li><a href="#problem">문제</a></li>
-        <li><a href="#how">작동 방식</a></li>
-        <li><a href="#features">기능</a></li>
-      </ul>
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="#project" aria-label="EcoSort 프로젝트 소개로 이동">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span><b>EcoSort</b><small>EDGE AI RECYCLING SORTER</small></span>
+    </a>
+    <nav class="tabs" aria-label="페이지">
+      <a href="#project" data-view="project">프로젝트</a>
+      <a href="#techniques" data-view="techniques">전처리·후처리</a>
+      <a href="#pipeline" data-view="pipeline">파이프라인</a>
     </nav>
-  </header>
+    <button class="theme-btn" id="themeBtn" type="button" aria-label="화면 테마 바꾸기">THEME</button>
+  </div>
+</header>
 
-  <main>
-    <!-- ===== 첫 화면: 제품 이름과 한 줄 소개 ===== -->
-    <div class="wrap hero">
-      <div>
-        <h1>[제품 이름]</h1>
-        <p class="tagline">[제품을 한 문장으로 소개해 주세요. 누구에게 어떤 도움을 주는지 쓰면 좋습니다.]</p>
-        <a class="button" href="#how">작동 방식 보기</a>
-      </div>
+<main class="wrap">
 
-      <div class="product-shot">
-        <div class="frame">
-          <!-- 이미지를 넣으려면 아래 문구를 지우고 이렇게 바꾸세요:
-               <img src="images/product.png" alt="제품 사진 설명"> -->
-          <span>제품 이미지 자리<br>images 폴더에 사진을 넣어 주세요</span>
-        </div>
+<!-- ═══════════════ 1. 프로젝트 ═══════════════ -->
+<div class="view" id="view-project">
+  <section class="hero" aria-labelledby="h-hero">
+    <div class="hero-copy">
+      <span class="label">개인 피지컬 AI 프로젝트 · 2026</span>
+      <h1 id="h-hero">하나씩 넣으면,<br><em>0.5초 안에</em> 제 통으로.</h1>
+      <p class="lead">에코소트는 투입구에 넣은 재활용품을 카메라와 센서로 인식해 플라스틱·캔·종이·기타 통으로 떨어뜨리는 탁상형 분류기입니다. 인식부터 판정까지 모두 기기 안에서 처리하고, 사진은 밖으로 나가지 않습니다.</p>
+      <div class="status-row">
+        <span class="chip ok"><span class="dot pulse"></span>전처리 코드 완성</span>
+        <span class="chip info">Jetson Orin Nano Super</span>
+        <span class="chip warn">현장 조사 · 시제품 준비 중</span>
       </div>
     </div>
+    <figure class="hud" style="margin:0" aria-label="라이트박스를 위에서 본 화면 예시: 페트병 주위에 인식 상자와 확률 0.94 표시">
+      <svg viewBox="0 0 640 400" role="img" aria-hidden="true">
+        <defs>
+          <radialGradient id="lb" cx="50%" cy="50%" r="70%">
+            <stop offset="0%" stop-color="var(--panel-2)"/>
+            <stop offset="100%" stop-color="var(--panel)"/>
+          </radialGradient>
+          <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+            <path d="M40 0H0V40" fill="none" stroke="var(--line)" stroke-width="1"/>
+          </pattern>
+        </defs>
+        <rect width="640" height="400" fill="url(#lb)"/>
+        <rect width="640" height="400" fill="url(#grid)"/>
+        <!-- 페트병 (위에서 본 모습) -->
+        <g transform="rotate(-18 320 205)">
+          <rect x="285" y="120" width="70" height="170" rx="14" fill="var(--secondary)" fill-opacity="0.16" stroke="var(--secondary)" stroke-opacity="0.55"/>
+          <rect x="300" y="96" width="40" height="30" rx="6" fill="var(--secondary)" fill-opacity="0.12" stroke="var(--secondary)" stroke-opacity="0.5"/>
+          <rect x="306" y="84" width="28" height="14" rx="3" fill="var(--secondary)" fill-opacity="0.8"/>
+          <rect x="285" y="185" width="70" height="40" fill="var(--primary)" fill-opacity="0.22"/>
+          <line x1="300" y1="140" x2="300" y2="270" stroke="var(--fg)" stroke-opacity="0.35" stroke-width="3" stroke-linecap="round"/>
+        </g>
+        <!-- 인식 상자와 모서리 표식 -->
+        <g fill="none" stroke="var(--primary)" stroke-width="2">
+          <rect x="226" y="62" width="190" height="276" stroke-opacity="0.5" stroke-dasharray="4 5"/>
+          <path d="M226 80V62H244M398 62H416V80M416 320V338H398M244 338H226V320"/>
+        </g>
+        <rect x="226" y="36" width="168" height="22" rx="3" fill="var(--primary)"/>
+        <text x="236" y="51" font-family="JetBrains Mono, monospace" font-size="12" font-weight="600" fill="var(--primary-ink)">PLASTIC · p=0.94</text>
+        <!-- 측정 주석 -->
+        <g font-family="JetBrains Mono, monospace" font-size="11" fill="var(--muted)">
+          <text x="430" y="120">S9 여백 +10%</text>
+          <line x1="418" y1="116" x2="428" y2="116" stroke="var(--muted)"/>
+          <text x="430" y="300">S13 → 256 → 224</text>
+          <line x1="418" y1="296" x2="428" y2="296" stroke="var(--muted)"/>
+        </g>
+      </svg>
+      <div class="scan" aria-hidden="true"></div>
+      <div class="hud-top"><span>LIGHTBOX · TOP VIEW</span><span>1920×1080 MJPG</span></div>
+      <div class="hud-bottom"><span>METAL 0 · 21 g</span><span>예시 화면</span></div>
+    </figure>
+  </section>
 
-    <!-- ===== 해결하려는 문제 ===== -->
-    <section class="block" id="problem">
-      <div class="wrap">
-        <h2>[어떤 문제를 해결하나요?]</h2>
-        <p class="lead">[사용자가 겪는 불편이나 문제를 2~3문장으로 설명해 주세요. 내 제품이 왜 필요한지가 드러나면 좋습니다.]</p>
-      </div>
-    </section>
+  <section aria-labelledby="h-how">
+    <div class="sec-head">
+      <span class="label">동작 순서</span>
+      <h2 id="h-how">넣고, 찍고, 판단하고, 떨어뜨린다</h2>
+    </div>
+    <div class="flow">
+      <div class="step panel"><span class="label">투입</span><h3>적외선 감지</h3><p>투입구에 물건 하나가 들어오면 측정이 시작됩니다.</p></div>
+      <div class="step panel"><span class="label">촬영</span><h3>멈춘 순간 1장</h3><p>흔들림이 멈춘 프레임을 고르고, 금속 감지와 무게를 함께 읽습니다.</p></div>
+      <div class="step panel"><span class="label">인식</span><h3>전처리 + 분류</h3><p>물체만 잘라 색을 보정하고 MobileNetV3로 4개 클래스 확률을 냅니다.</p></div>
+      <div class="step panel"><span class="label">판정</span><h3>센서 결합</h3><p>금속이면 캔, 확신이 낮으면 '확인 필요'로 보냅니다.</p></div>
+      <div class="step panel"><span class="label">투하</span><h3>서보 2개</h3><p>회전 슈트와 개폐판이 해당 통으로 떨어뜨리고 LCD에 결과를 보여 줍니다.</p></div>
+    </div>
+  </section>
 
-    <!-- ===== 작동 방식: 피지컬 AI의 감지 → 판단 → 행동 ===== -->
-    <section class="block" id="how">
-      <div class="wrap">
-        <h2>이렇게 작동합니다</h2>
-        <p class="lead">[제품이 현실 세계에서 어떻게 움직이는지 간단히 소개해 주세요.]</p>
+  <section aria-labelledby="h-bins">
+    <div class="sec-head">
+      <span class="label">출력</span>
+      <h2 id="h-bins">통 4개와 사람에게 묻는 한 칸</h2>
+      <p>유리는 투하 중 깨질 위험이 있어 1차 버전에서는 '기타'로 보냅니다. 판단이 어려우면 노란 LED가 켜지고, 사용자가 버튼으로 고른 답이 다음 학습의 정답이 됩니다.</p>
+    </div>
+    <div class="bins">
+      <div class="bin ok"><span class="k">BIN 1</span><b>플라스틱</b><p>페트병, PP·PS 용기, 컵</p></div>
+      <div class="bin ok"><span class="k">BIN 2</span><b>캔</b><p>금속 감지 시 확정</p></div>
+      <div class="bin ok"><span class="k">BIN 3</span><b>종이</b><p>종이, 골판지, 종이컵</p></div>
+      <div class="bin ok"><span class="k">BIN 4</span><b>기타</b><p>유리, 비닐 등</p></div>
+      <div class="bin warn"><span class="k">BUTTON</span><b>확인 필요</b><p>사용자가 직접 선택 → 라벨 저장</p></div>
+    </div>
+  </section>
 
-        <ol class="flow">
-          <li>
-            <h3>감지</h3>
-            <p>[어떤 센서로 무엇을 알아차리나요?]</p>
-          </li>
-          <li>
-            <h3>판단</h3>
-            <p>[AI가 어떤 정보를 보고 무엇을 결정하나요?]</p>
-          </li>
-          <li>
-            <h3>행동</h3>
-            <p>[결정에 따라 어떻게 움직이거나 반응하나요?]</p>
-          </li>
+  <section aria-labelledby="h-kpi">
+    <div class="sec-head">
+      <span class="label">목표 KPI · PRD 기준</span>
+      <h2 id="h-kpi">정확도보다 먼저 정한 시간 예산</h2>
+      <p>아래 숫자는 아직 달성한 값이 아니라 설계 목표입니다. 실측값은 Jetson 연결 후 채웁니다.</p>
+    </div>
+    <div class="kpis">
+      <div class="kpi"><span class="label">분류 정확도</span><span class="v">≥92<small>%</small></span><p>고정 테스트셋 400장</p></div>
+      <div class="kpi"><span class="label">클래스별 재현율</span><span class="v">≥88<small>%</small></span><p>혼동 행렬 기준</p></div>
+      <div class="kpi"><span class="label">투입 → 판정</span><span class="v">≤0.5<small>s</small></span><p>전처리 예산 약 50ms</p></div>
+      <div class="kpi"><span class="label">모델 추론</span><span class="v">≤30<small>ms</small></span><p>TensorRT FP16</p></div>
+      <div class="kpi"><span class="label">통 혼입률</span><span class="v">≤5<small>%</small></span><p>주 1회 수작업 점검</p></div>
+    </div>
+  </section>
+
+  <section aria-labelledby="h-hw">
+    <div class="sec-head">
+      <span class="label">구성</span>
+      <h2 id="h-hw">약 70만 원으로 만드는 하드웨어</h2>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>역할</th><th>부품</th><th>선택 이유</th></tr></thead>
+        <tbody>
+          <tr><td>촬영</td><td>흰색 아크릴 라이트박스, LED 확산 조명, 1080p 웹캠</td><td>외부광을 막아 배경이 항상 같게 유지됩니다. 노출·화이트밸런스·초점은 수동 고정.</td></tr>
+          <tr><td>연산</td><td>Jetson Orin Nano Super 8GB</td><td>TensorRT로 FP16 추론. 인터넷 없이 동작합니다.</td></tr>
+          <tr><td>센서</td><td>적외선 투입 감지, 유도형 금속 센서, 로드셀(HX711), 초음파</td><td>투입 시점, 캔 확정, 무게 보조, 통 적재량.</td></tr>
+          <tr><td>구동</td><td>ESP32 + PCA9685, MG996R 서보 2개</td><td>회전 슈트와 개폐판. Jetson과 USB 시리얼 통신.</td></tr>
+          <tr><td>운영</td><td>FastAPI, SQLite, Streamlit, 텔레그램 봇</td><td>판정 로그, 대시보드, 통 가득 참 알림.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section aria-labelledby="h-prog">
+    <div class="sec-head">
+      <span class="label">진행 상황 · 2026-10-07</span>
+      <h2 id="h-prog">지금 어디까지 왔나</h2>
+    </div>
+    <div class="panel progress">
+      <div class="prog-item"><span class="chip ok">완료</span><div><b>설계 문서</b><p class="muted">PRD, 전처리 상세 설계(원칙 P1~P6, 단계 S0~S14), 개인 진행판 현장 조사 체크리스트.</p></div></div>
+      <div class="prog-item"><span class="chip ok">완료</span><div><b>전처리 코드</b><p class="muted">가상 라이트박스 328장 모두 물체 검출, 1코어 CPU 평균 6.1ms(p95 7.5ms). 공개 데이터 합성 경로와 Colab 노트북 포함.</p></div></div>
+      <div class="prog-item"><span class="chip warn">진행 중</span><div><b>현장 조사와 샘플 수집</b><p class="muted">2주 배출 기록, 물체 ID를 붙인 샘플 수거함, 지자체 분리배출 기준 확인.</p></div></div>
+      <div class="prog-item"><span class="chip off">예정</span><div><b>시제품 · 학습 · Jetson 실측</b><p class="muted">라이트박스 조립 → 배경 촬영 → 자체 데이터 학습 → TensorRT 엔진 → 처리 시간 실측.</p></div></div>
+    </div>
+  </section>
+</div>
+
+<!-- ═══════════════ 2. 전처리·후처리 ═══════════════ -->
+<div class="view" id="view-techniques" hidden>
+  <section aria-labelledby="h-tech">
+    <div class="sec-head">
+      <span class="label">기법</span>
+      <h1 id="h-tech">배경이 늘 같다는 점을 끝까지 이용한다</h1>
+      <p>에코소트의 카메라는 항상 같은 흰 라이트박스를 봅니다. 그래서 무거운 범용 기법 대신, 빈 배경을 기준판으로 삼는 가벼운 기법을 골랐습니다. 모든 순서는 아래 여섯 원칙으로 설명할 수 있어야 합니다.</p>
+    </div>
+    <div class="principles">
+      <div class="pr"><span class="mono">P1</span><b>싼 검사 먼저</b><p>노출·흐림 실패는 연산 전에 걸러 재촬영 시간을 남긴다.</p></div>
+      <div class="pr"><span class="mono">P2</span><b>찾기는 저해상도</b><p>위치는 1/4 축소로, 분류용 크롭은 원본 해상도에서.</p></div>
+      <div class="pr"><span class="mono">P3</span><b>보정은 크롭 후</b><p>픽셀별 보정은 잘라낸 영역에만. 결과는 같고 계산은 1/5 이하.</p></div>
+      <div class="pr"><span class="mono">P4</span><b>비교 대상도 같은 처리</b><p>저장 배경에도 축소·블러·Lab 변환을 똑같이.</p></div>
+      <div class="pr"><span class="mono">P5</span><b>학습과 추론은 같은 함수</b><p>학습 데이터도 장치와 같은 코드로 전처리한다.</p></div>
+      <div class="pr"><span class="mono">P6</span><b>판정 단서는 보존</b><p>색·광택·투명도는 지우지 않고 잡음만 줄인다.</p></div>
+    </div>
+  </section>
+
+  <section aria-labelledby="h-pre">
+    <div class="sec-head">
+      <span class="label">전처리</span>
+      <h2 id="h-pre">장치에서 실시간으로 하는 일</h2>
+    </div>
+    <div class="subtabs" role="tablist" aria-label="전처리 묶음">
+      <button role="tab" type="button" aria-selected="true" data-tab="find" id="tab-find">물체 찾기</button>
+      <button role="tab" type="button" aria-selected="false" data-tab="fix" id="tab-fix">자르고 보정하기</button>
+      <button role="tab" type="button" aria-selected="false" data-tab="train" id="tab-train">학습 데이터 맞추기</button>
+    </div>
+
+    <div class="tech g2 grid" data-panel="find" role="tabpanel" aria-labelledby="tab-find">
+      <article class="tech-card">
+        <header><h3>Lab 가중 색차 배경 차분</h3><span class="chip info">S3–S4</span></header>
+        <p class="why">부팅 때 저장한 빈 배경과 비교해 달라진 곳을 찾습니다. 그림자는 밝기만 바꾸고 색은 거의 바꾸지 않으므로, 밝기 차이에 0.5 가중치를 주고 세 채널 중 최댓값을 씁니다.</p>
+        <div class="formula">diff = max(<b>0.5</b>·|ΔL|, |Δa|, |Δb|) &gt; <b>20</b></div>
+        <p class="cite">근거: <a href="https://en.wikipedia.org/wiki/CIELAB_color_space" target="_blank" rel="noopener">CIELAB</a>, <a href="https://reference-global.com/article/10.2478/cait-2013-0009" target="_blank" rel="noopener">Murali &amp; Govindan 2013 (Lab 그림자 검출)</a></p>
+      </article>
+      <article class="tech-card">
+        <header><h3>열림 → 닫힘 모폴로지</h3><span class="chip info">S6</span></header>
+        <p class="why">3×3 열림으로 먼지와 압축 잡음을 먼저 지우고, 7×7 닫힘으로 투명 페트병 몸통처럼 끊긴 구멍을 메웁니다. 순서를 바꾸면 잡음이 물체에 붙어 지워지지 않습니다.</p>
+        <div class="meta"><span class="chip off">open 3×3</span><span class="chip off">close 7×7</span><span class="chip off">먼지 많으면 5×5 (A-05)</span></div>
+        <p class="cite">근거: <a href="https://docs.opencv.org/4.x/d9/d61/tutorial_py_morphological_ops.html" target="_blank" rel="noopener">OpenCV Morphological Transformations</a></p>
+      </article>
+      <article class="tech-card">
+        <header><h3>조각 묶기와 여러 개 판정</h3><span class="chip info">S7</span></header>
+        <p class="why">캔의 띠와 뚜껑처럼 한 물체가 끊겨 보이면 팽창한 마스크로 한 묶음으로 봅니다. 비슷한 크기 묶음이 둘 이상이면 동시 투입으로 보고 '확인 필요'로 보냅니다.</p>
+        <div class="formula">2번째 면적 ≥ <b>0.3</b> × 1번째 → multi_object</div>
+        <p class="cite">근거: <a href="https://docs.opencv.org/4.x/d4/d73/tutorial_py_contours_begin.html" target="_blank" rel="noopener">OpenCV Contours</a></p>
+      </article>
+      <article class="tech-card">
+        <header><h3>투명 물체용 엣지 보조</h3><span class="chip warn">S8 · 조건부</span></header>
+        <p class="why">흰 배경 위 투명 페트는 색 차이가 거의 없습니다. 색차 마스크가 비었거나 1.5% 미만이거나 조각났을 때만, 배경 엣지를 뺀 Sobel 엣지를 OR로 더해 다시 찾습니다.</p>
+        <div class="meta"><span class="chip ok">edge_assist</span><span class="chip warn">edge_fallback → 임계 0.7</span></div>
+        <p class="cite">가상 데이터에서 반투명 페트병이 라벨만 잡히던 경우, 엣지 보조로 병 전체가 잡혔습니다.</p>
+      </article>
+    </div>
+
+    <div class="tech g2 grid" data-panel="fix" role="tabpanel" aria-labelledby="tab-fix" hidden>
+      <article class="tech-card">
+        <header><h3>원본 해상도 크롭 + 여백 10%</h3><span class="chip info">S9–S10</span></header>
+        <p class="why">위치는 480×270에서 찾았지만, 코팅 종이컵의 광택과 페트 표면 질감은 1080p 원본에만 남아 있습니다. 상자를 4배로 키워 원본에서 자르고, 마스크가 놓친 투명한 가장자리를 위해 여백을 둡니다.</p>
+        <p class="cite">배경을 지우지 않는 이유: 마스크가 틀리면 물체 일부가 사라집니다. 배경은 늘 같은 흰색이라 남겨도 모델이 덜 헷갈립니다.</p>
+      </article>
+      <article class="tech-card">
+        <header><h3>라플라시안 분산 흐림 검사</h3><span class="chip info">S11</span></header>
+        <p class="why">넓은 흰 배경이 분산을 낮추므로 전체 화면이 아니라 물체 크롭에서 잽니다. 기준값은 학습 사진 선명도의 하위 5% × 0.8로 자동으로 정해 장치와 공유합니다.</p>
+        <div class="formula">var(∇²I<sub>crop</sub>) &lt; <b>blur_thresh</b> → blurry</div>
+        <p class="cite">근거: <a href="https://doi.org/10.1109/ICPR.2000.903548" target="_blank" rel="noopener">Pech-Pacheco et al. 2000</a>, <a href="https://pyimagesearch.com/2015/09/07/blur-detection-with-opencv/" target="_blank" rel="noopener">PyImageSearch 해설</a></p>
+      </article>
+      <article class="tech-card">
+        <header><h3>이득 맵 한 번 곱하기</h3><span class="chip info">S12</span></header>
+        <p class="why">흰 배경 자체가 조명 분포입니다. 배경을 크게 흐린 뒤 채널별로 목표값을 나눈 이득 맵을 부팅 때 만들어 두면, 곱셈 한 번으로 비네팅과 색 틀어짐이 함께 보정됩니다. 목표를 235로 둬 하이라이트 여유를 남깁니다.</p>
+        <div class="formula">gain = <b>235</b> / Gσ=25(배경)　→　crop × gain</div>
+        <p class="cite">근거: <a href="https://en.wikipedia.org/wiki/Flat-field_correction" target="_blank" rel="noopener">Flat-field correction</a></p>
+      </article>
+      <article class="tech-card">
+        <header><h3>배경색 정사각형 패딩</h3><span class="chip info">S13</span></header>
+        <p class="why">페트병을 정사각형으로 늘리면 '길쭉함'이라는 형태 단서가 사라집니다. 짧은 변을 크롭 테두리의 중앙값 색으로 채워 256으로 저장하고, 모델 입력 224는 중앙 크롭으로 만듭니다.</p>
+        <div class="meta"><span class="chip off">검은 패딩 ×</span><span class="chip off">늘이기 ×</span><span class="chip ok">테두리 중앙값 색 ○</span></div>
+      </article>
+    </div>
+
+    <div class="tech g2 grid" data-panel="train" role="tabpanel" aria-labelledby="tab-train" hidden>
+      <article class="tech-card">
+        <header><h3>공개 데이터를 라이트박스로 옮기기</h3><span class="chip info">오프라인</span></header>
+        <p class="why">TrashNet은 GrabCut으로, TACO는 제공된 분할 마스크로 물체만 오려낸 뒤 빈 라이트박스 배경에 크기·위치·회전·그림자를 무작위로 합성하고, 장치와 같은 전처리를 통과시킵니다.</p>
+        <p class="cite">근거: <a href="https://github.com/garythung/trashnet" target="_blank" rel="noopener">TrashNet</a>, <a href="https://arxiv.org/abs/2003.06975" target="_blank" rel="noopener">TACO</a>, <a href="https://doi.org/10.1145/1015706.1015720" target="_blank" rel="noopener">GrabCut (Rother et al. 2004)</a></p>
+      </article>
+      <article class="tech-card">
+        <header><h3>Reinhard 색 맞춤</h3><span class="chip warn">실험 E4</span></header>
+        <p class="why">합성한 물체의 Lab 평균·표준편차를 자체 촬영 데이터의 같은 클래스 분포 쪽으로 절반만 옮깁니다. 효과는 원본 / 합성 / 합성 + 색 맞춤 비교로 확인합니다.</p>
+        <p class="cite">근거: <a href="https://doi.org/10.1109/38.946629" target="_blank" rel="noopener">Reinhard et al. 2001, Color Transfer between Images</a></p>
+      </article>
+      <article class="tech-card">
+        <header><h3>기하 먼저, 색은 약하게</h3><span class="chip info">증강</span></header>
+        <p class="why">회전 0–360°, 반전, 격자 왜곡, 랜덤 크롭을 먼저 하고 밝기 ±10%, 색조 ±5처럼 색 변화는 좁게 둡니다. 조명이 고정된 장치에서 강한 색 증강은 존재하지 않는 입력을 만들고, 투명 페트와 유색 플라스틱의 구분을 흐립니다.</p>
+      </article>
+      <article class="tech-card">
+        <header><h3>물체 ID 단위 분할</h3><span class="chip ok">누수 검사</span></header>
+        <p class="why">같은 물건을 여러 번 찍은 사진이 학습과 평가에 나뉘어 들어가면 정확도가 부풀려집니다. 파일명의 물체 ID로 나누고, 같은 ID가 양쪽에 있으면 경고합니다.</p>
+        <p class="cite">근거: <a href="https://developers.google.com/machine-learning/guides/rules-of-ml" target="_blank" rel="noopener">Rules of ML #32 학습·서빙 코드 공유</a></p>
+      </article>
+    </div>
+  </section>
+
+  <section aria-labelledby="h-not">
+    <div class="sec-head">
+      <span class="label">일부러 뺀 것</span>
+      <h2 id="h-not">흔하지만 이 장치에는 맞지 않는 기법</h2>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>기법</th><th>빼는 이유</th><th>다시 볼 조건</th></tr></thead>
+        <tbody>
+          <tr><td>MOG2 배경 학습</td><td>한 장만 찍는 장치에서는 저장 배경과의 단순 차분이 더 빠르고 예측 가능하다.</td><td>없음 (배경 유지 관리로 대체)</td></tr>
+          <tr><td>CLAHE·평활화</td><td>사진마다 분포를 바꿔 투명 페트와 흰 종이의 미묘한 차이를 흐린다.</td><td>렌즈 결로 (A-04)</td></tr>
+          <tr><td>그레이스케일</td><td>색은 핵심 단서다.</td><td>없음</td></tr>
+          <tr><td>NLM 디노이징</td><td>크롭 하나에 수십~수백 ms. 예산 초과.</td><td>저조도로 노출을 크게 올릴 때</td></tr>
+          <tr><td>하이라이트 인페인팅</td><td>가짜 질감을 만든다. 하이라이트 자체가 금속·플라스틱 단서다.</td><td>없음 (노출 하향, 편광 필름)</td></tr>
+          <tr><td>마스크 밖 배경 지우기</td><td>마스크가 틀리면 물체가 잘린다.</td><td>마스크 IoU ≥ 0.95 (E9)</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section aria-labelledby="h-post">
+    <div class="sec-head">
+      <span class="label">후처리</span>
+      <h2 id="h-post">확률을 행동으로 바꾸는 규칙</h2>
+      <p>모델이 낸 확률을 그대로 믿지 않습니다. 센서 값과 전처리 플래그를 더해 통을 고르고, 애매하면 사람에게 묻습니다. 아래에서 값을 바꿔 판정이 어떻게 달라지는지 확인해 보세요.</p>
+    </div>
+    <div class="sim panel">
+      <form class="grid" id="simForm" style="gap:16px" onsubmit="return false">
+        <div class="field">
+          <label for="simClass">모델 최고 확률 클래스</label>
+          <select id="simClass">
+            <option value="plastic">플라스틱</option>
+            <option value="can">캔</option>
+            <option value="paper" selected>종이</option>
+            <option value="etc">기타</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="simProb">최고 확률 <span class="mono" id="simProbOut">0.82</span></label>
+          <input type="range" id="simProb" min="0.30" max="1" step="0.01" value="0.82">
+        </div>
+        <div class="field">
+          <label for="simFlag">전처리 결과</label>
+          <select id="simFlag">
+            <option value="ok">정상</option>
+            <option value="edge_assist">edge_assist (엣지 보조로 보완)</option>
+            <option value="edge_fallback">edge_fallback (엣지로만 찾음)</option>
+            <option value="blurry">blurry (흐림)</option>
+            <option value="multi_object">multi_object (여러 개 투입)</option>
+            <option value="no_object">no_object (물체 못 찾음)</option>
+          </select>
+        </div>
+        <label class="toggle" for="simMetal"><input type="checkbox" id="simMetal"> 금속 센서 감지</label>
+      </form>
+      <div class="verdict" aria-live="polite">
+        <span class="label">판정</span>
+        <div class="out"><b id="simOut">종이</b><span class="chip ok" id="simChip">확정</span></div>
+        <div class="mini-bins" id="simBins">
+          <div data-bin="plastic">플라스틱</div><div data-bin="can">캔</div><div data-bin="paper">종이</div><div data-bin="etc">기타</div><div data-bin="review">확인</div>
+        </div>
+        <ol id="simRules">
+          <li data-r="err">전처리 실패(no_object · multi_object · light_error) → 확인 필요</li>
+          <li data-r="metal">금속 감지 → 캔으로 확정</li>
+          <li data-r="raise">edge_fallback · blurry → 임계값 0.6에서 0.7로 상향</li>
+          <li data-r="low">최고 확률 &lt; 임계값 → 확인 필요 (노란 LED, 버튼 선택이 정답 라벨)</li>
+          <li data-r="pass">그 외 → 최고 확률 클래스의 통</li>
         </ol>
       </div>
-    </section>
-
-    <!-- ===== 주요 기능: 항목을 복사해서 늘리거나 지워도 됩니다 ===== -->
-    <section class="block" id="features">
-      <div class="wrap">
-        <h2>주요 기능</h2>
-
-        <ul class="features">
-          <li>
-            <h3>[기능 1]</h3>
-            <p>[기능 설명]</p>
-          </li>
-          <li>
-            <h3>[기능 2]</h3>
-            <p>[기능 설명]</p>
-          </li>
-          <li>
-            <h3>[기능 3]</h3>
-            <p>[기능 설명]</p>
-          </li>
-        </ul>
-      </div>
-    </section>
-  </main>
-
-  <!-- ===== 하단: 만든 사람 정보 ===== -->
-  <footer>
-    <div class="wrap">
-      <span>만든 사람: [이름]</span>
-      <span>나만의 피지컬 AI 제품 기획 과제</span>
     </div>
-  </footer>
+    <div class="grid g3">
+      <article class="tech-card">
+        <header><h3>선택적 분류</h3><span class="chip ok">적용</span></header>
+        <p class="why">틀릴 바에는 답을 보류하는 편이 통 혼입률(목표 5% 이하)에 유리합니다. '확인 필요' 비율은 초기 15%에서 재학습 4주 후 7%를 목표로 줄입니다.</p>
+        <p class="cite">근거: <a href="https://arxiv.org/abs/1705.08500" target="_blank" rel="noopener">Geifman &amp; El-Yaniv 2017</a></p>
+      </article>
+      <article class="tech-card">
+        <header><h3>온도 스케일링</h3><span class="chip warn">검토 중</span></header>
+        <p class="why">신경망의 소프트맥스 확률은 실제 정답률보다 높게 나오는 경향이 있습니다. 검증셋으로 온도 하나를 맞추면 0.6이라는 임계값이 실제 의미를 갖게 됩니다.</p>
+        <p class="cite">근거: <a href="https://arxiv.org/abs/1706.04599" target="_blank" rel="noopener">Guo et al. 2017</a></p>
+      </article>
+      <article class="tech-card">
+        <header><h3>능동 학습 루프</h3><span class="chip ok">적용</span></header>
+        <p class="why">저신뢰 사진과 사용자의 버튼 선택을 자동으로 모아, 주 1회 검수 후 재학습합니다. 고정 테스트셋 정확도가 기존보다 높을 때만 배포하고, 이전 모델로 되돌릴 수 있습니다.</p>
+        <p class="cite">근거: <a href="https://research.cs.wisc.edu/techreports/2009/TR1648.pdf" target="_blank" rel="noopener">Settles 2009, Active Learning Survey</a></p>
+      </article>
+    </div>
+  </section>
+</div>
+
+<!-- ═══════════════ 3. 파이프라인 ═══════════════ -->
+<div class="view" id="view-pipeline" hidden>
+  <section aria-labelledby="h-pipe">
+    <div class="sec-head">
+      <span class="label">파이프라인</span>
+      <h1 id="h-pipe">500ms 안에 들어가는 순서</h1>
+      <p>투입부터 판정까지의 예산을 실제 비율로 그렸습니다. 대부분의 시간은 물체가 멈추기를 기다리는 데 쓰이고, 전처리는 막대에서 겨우 보이는 폭입니다.</p>
+    </div>
+    <div class="panel budget">
+      <div class="bar" id="budgetBar" role="img" aria-label="시간 예산 막대: 정지 감지 최대 300ms, 전처리 약 11ms, 재촬영 여유 40ms, 추론 30ms, 판정과 전송 5ms, 합계 약 386ms, 목표 500ms"></div>
+      <div class="scale"><span>0</span><span>100</span><span>200</span><span>300</span><span>400</span><span>500 ms</span></div>
+      <div class="legend" id="budgetLegend"></div>
+      <p class="muted" style="font-size:13px">합계 최대 약 <span class="mono">386ms</span>. 전처리는 Jetson CPU 추정치이며 가상 데이터 1코어 실측은 평균 6.1ms. Jetson 실측(H-03)으로 갱신 예정.</p>
+    </div>
+  </section>
+
+  <section aria-labelledby="h-stages">
+    <div class="sec-head">
+      <span class="label">실시간 단계 S0–S14</span>
+      <h2 id="h-stages">저해상도로 찾고, 원본으로 인식한다</h2>
+    </div>
+    <div class="panel stages">
+      <div class="stage-group">촬영 · 검사</div>
+      <div class="stage"><span class="id">S0</span><div><b>정지 감지 후 촬영</b><p>160×90으로 줄인 연속 프레임 차이가 2 미만이 되면 촬영. 최대 0.3초.</p></div><span class="t">≤300ms</span></div>
+      <div class="stage"><span class="id">S1</span><div><b>1/4 축소</b><p>INTER_AREA로 1920×1080 → 480×270. 평균을 내므로 잡음도 줄어든다.</p></div><span class="t">1.0ms</span></div>
+      <div class="stage"><span class="id">S2</span><div><b>노출 검사</b><p>배경 대비 ±25% 벗어나면 조명 이상, 포화 5% 초과면 표시.</p></div><span class="t">0.3ms</span></div>
+      <div class="stage-group">물체 찾기 · 480×270</div>
+      <div class="stage"><span class="id">S3–S6</span><div><b>블러 · Lab · 가중 색차 · 이진화 · 열림→닫힘</b><p>저장 배경에도 같은 처리를 미리 해 둔다 (P4).</p></div><span class="t">2.0ms</span></div>
+      <div class="stage"><span class="id">S7</span><div><b>물체 선택 · 여러 개 판정</b><p>조각 묶기, 최소 면적 0.5%.</p></div><span class="t">0.3ms</span></div>
+      <div class="stage"><span class="id cond">S8</span><div><b>엣지 보조 (조건부)</b><p>투명·작음·조각났을 때만 Sobel 엣지를 OR 결합.</p></div><span class="t">1.5ms</span></div>
+      <div class="stage-group">자르기 · 보정 · 원본 해상도</div>
+      <div class="stage"><span class="id">S9–S10</span><div><b>상자 ×4 + 여백 10% → 원본 크롭</b><p>왜곡 보정이 필요하면 크롭 영역의 remap 맵만 사용 (D-05).</p></div><span class="t">0.6ms</span></div>
+      <div class="stage"><span class="id">S11</span><div><b>흐림 검사</b><p>크롭을 긴 변 256으로 줄여 라플라시안 분산 측정.</p></div><span class="t">0.5ms</span></div>
+      <div class="stage"><span class="id">S12</span><div><b>이득 맵 곱셈</b><p>조명 불균일과 색을 한 번에. 리사이즈 전에 해야 위치가 맞는다.</p></div><span class="t">1.5ms</span></div>
+      <div class="stage"><span class="id">S13</span><div><b>배경색 패딩 → 256 → 중앙 224</b><p>학습은 같은 256에서 랜덤 크롭 (P5).</p></div><span class="t">1.0ms</span></div>
+      <div class="stage"><span class="id">S14</span><div><b>정규화 · FP16 (GPU)</b><p>BGR→RGB, ImageNet 평균·표준편차, CHW. 업로드 직후 GPU에서.</p></div><span class="t">1.0ms</span></div>
+    </div>
+  </section>
+
+  <section aria-labelledby="h-offline">
+    <div class="sec-head">
+      <span class="label">오프라인 · 운영 루프</span>
+      <h2 id="h-offline">Colab에서 만들고, Jetson에서 돌린다</h2>
+      <p>학습 데이터도 장치와 같은 전처리 함수를 통과합니다. 설정 파일 하나(pre_config.json)를 학습과 장치가 함께 읽어 학습·추론 불일치를 막습니다.</p>
+    </div>
+    <div class="lane">
+      <div><span class="label">수집</span><b>자체 촬영 + 공개 데이터</b><p>물체 ID 파일명, TrashNet · TACO · AI Hub</p><span class="where">PC · 집</span></div>
+      <div><span class="label">맞추기</span><b>오려내기 → 배경 합성</b><p>GrabCut, 분할 마스크, Reinhard 색 맞춤</p><span class="where">COLAB</span></div>
+      <div><span class="label">전처리</span><b>S1–S13 동일 함수</b><p>256 저장, 물체 ID 단위 분할</p><span class="where">COLAB</span></div>
+      <div><span class="label">학습</span><b>사전학습 → 미세조정</b><p>MobileNetV3-Large, 약한 색 증강</p><span class="where">COLAB GPU</span></div>
+      <div><span class="label">배포</span><b>ONNX → TensorRT FP16</b><p>엔진은 Jetson에서 빌드</p><span class="where">JETSON</span></div>
+      <div><span class="label">운영</span><b>저신뢰 · 버튼 라벨 적재</b><p>주 1회 검수 → 재학습 → 성능 높을 때만 교체</p><span class="where">JETSON → COLAB</span></div>
+    </div>
+  </section>
+
+  <section aria-labelledby="h-exp">
+    <div class="sec-head">
+      <span class="label">검증 실험</span>
+      <h2 id="h-exp">한 번에 하나만 바꿔서 확인할 것</h2>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>실험</th><th>비교</th><th>판단 기준</th></tr></thead>
+        <tbody>
+          <tr><td class="num">E1</td><td>이진화 임계값 12 / 20 / 30</td><td>정답 마스크 IoU 0.9 이상 중 투명 물체 IoU 최대</td></tr>
+          <tr><td class="num">E2</td><td>밝기 가중치 1.0 / 0.5 / 0.3</td><td>그림자 포함 비율 최소, IoU 유지</td></tr>
+          <tr><td class="num">E3</td><td>색차만 / 조건부 엣지 / 항상 OR</td><td>투명 품목 크롭 성공률 95% 이상</td></tr>
+          <tr><td class="num">E4</td><td>원본 / 합성 / 합성 + 색 맞춤</td><td>자체 테스트셋 정확도 최대</td></tr>
+          <tr><td class="num">E5</td><td>이득 맵 적용 / 미적용, 중앙·가장자리</td><td>가장자리 정확도 하락 2%p 이내</td></tr>
+          <tr><td class="num">E6</td><td>배경색 패딩 / 검은 패딩 / 늘이기 / 전체 화면</td><td>테스트 정확도 최대</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section aria-labelledby="h-refs">
+    <div class="sec-head">
+      <span class="label">참고 자료</span>
+      <h2 id="h-refs">근거로 삼은 문헌과 문서</h2>
+    </div>
+    <ol class="refs">
+      <li>Thung &amp; Yang, TrashNet, Stanford CS229, 2016. <a href="https://github.com/garythung/trashnet" target="_blank" rel="noopener">github.com/garythung/trashnet</a></li>
+      <li>Proença &amp; Simões, TACO: Trash Annotations in Context, 2020. <a href="https://arxiv.org/abs/2003.06975" target="_blank" rel="noopener">arXiv:2003.06975</a></li>
+      <li>Howard et al., Searching for MobileNetV3, ICCV 2019. <a href="https://arxiv.org/abs/1905.02244" target="_blank" rel="noopener">arXiv:1905.02244</a></li>
+      <li>OpenCV, Morphological Transformations / Contours. <a href="https://docs.opencv.org/4.x/d9/d61/tutorial_py_morphological_ops.html" target="_blank" rel="noopener">docs.opencv.org</a></li>
+      <li>Rother, Kolmogorov &amp; Blake, GrabCut, ACM TOG 2004. <a href="https://doi.org/10.1145/1015706.1015720" target="_blank" rel="noopener">doi:10.1145/1015706.1015720</a></li>
+      <li>Flat-field correction. <a href="https://en.wikipedia.org/wiki/Flat-field_correction" target="_blank" rel="noopener">Wikipedia</a></li>
+      <li>Pech-Pacheco et al., Diatom autofocusing in brightfield microscopy, ICPR 2000. <a href="https://doi.org/10.1109/ICPR.2000.903548" target="_blank" rel="noopener">doi:10.1109/ICPR.2000.903548</a></li>
+      <li>Murali &amp; Govindan, Shadow Detection and Removal Using LAB Color Space, 2013. <a href="https://reference-global.com/article/10.2478/cait-2013-0009" target="_blank" rel="noopener">doi:10.2478/cait-2013-0009</a></li>
+      <li>Reinhard et al., Color Transfer between Images, IEEE CG&amp;A 2001. <a href="https://doi.org/10.1109/38.946629" target="_blank" rel="noopener">doi:10.1109/38.946629</a></li>
+      <li>Geifman &amp; El-Yaniv, Selective Classification for Deep Neural Networks, NeurIPS 2017. <a href="https://arxiv.org/abs/1705.08500" target="_blank" rel="noopener">arXiv:1705.08500</a></li>
+      <li>Guo et al., On Calibration of Modern Neural Networks, ICML 2017. <a href="https://arxiv.org/abs/1706.04599" target="_blank" rel="noopener">arXiv:1706.04599</a></li>
+      <li>Settles, Active Learning Literature Survey, 2009. <a href="https://research.cs.wisc.edu/techreports/2009/TR1648.pdf" target="_blank" rel="noopener">TR1648</a></li>
+      <li>Zinkevich, Rules of Machine Learning, Google. <a href="https://developers.google.com/machine-learning/guides/rules-of-ml" target="_blank" rel="noopener">developers.google.com</a></li>
+      <li>NVIDIA, TensorRT Documentation. <a href="https://docs.nvidia.com/deeplearning/tensorrt/latest/index.html" target="_blank" rel="noopener">docs.nvidia.com</a></li>
+      <li>NVIDIA, Jetson Orin Nano Super Developer Kit. <a href="https://www.nvidia.com/en-us/autonomous-machines/embedded-systems/jetson-orin/nano-super-developer-kit/" target="_blank" rel="noopener">nvidia.com</a></li>
+      <li>환경부, 전국 공동주택 투명페트병 별도 분리배출 의무화, 2020-12-23. <a href="https://www.korea.kr/briefing/pressReleaseView.do?newsId=156428815" target="_blank" rel="noopener">korea.kr</a></li>
+    </ol>
+  </section>
+</div>
+</main>
+
+<footer>
+  <div class="wrap">EcoSort · 1인 개인 프로젝트 · 수치 중 '목표'는 PRD 기준 설계값이며 실측값이 아닙니다.</div>
+</footer>
+
+<script>
+(function () {
+  // ── 페이지 전환 (#project / #techniques / #pipeline) ──
+  var views = ["project", "techniques", "pipeline"];
+  function show() {
+    var id = (location.hash || "#project").slice(1);
+    if (views.indexOf(id) < 0) id = "project";
+    views.forEach(function (v) { document.getElementById("view-" + v).hidden = v !== id; });
+    document.querySelectorAll("nav.tabs a").forEach(function (a) {
+      if (a.dataset.view === id) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
+    });
+    window.scrollTo(0, 0);
+  }
+  window.addEventListener("hashchange", show);
+  show();
+
+  // ── 테마 전환 (시스템 → 반대 테마 → 시스템) ──
+  var root = document.documentElement, btn = document.getElementById("themeBtn");
+  function sysDark() { return window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches; }
+  function label() {
+    var t = root.getAttribute("data-theme");
+    btn.textContent = t ? (t === "dark" ? "DARK" : "LIGHT") : (sysDark() ? "DARK · AUTO" : "LIGHT · AUTO");
+  }
+  try { var saved = localStorage.getItem("ecosort-theme"); if (saved) root.setAttribute("data-theme", saved); } catch (e) {}
+  btn.addEventListener("click", function () {
+    var cur = root.getAttribute("data-theme") || (sysDark() ? "dark" : "light");
+    var next = cur === "dark" ? "light" : "dark";
+    root.setAttribute("data-theme", next);
+    try { localStorage.setItem("ecosort-theme", next); } catch (e) {}
+    label();
+  });
+  label();
+
+  // ── 전처리 하위 탭 ──
+  var tabs = document.querySelectorAll(".subtabs button");
+  tabs.forEach(function (b) {
+    b.addEventListener("click", function () {
+      tabs.forEach(function (x) { x.setAttribute("aria-selected", String(x === b)); });
+      document.querySelectorAll("[data-panel]").forEach(function (p) { p.hidden = p.dataset.panel !== b.dataset.tab; });
+    });
+  });
+
+  // ── 시간 예산 막대 (500ms 기준 실제 비율) ──
+  var budget = [
+    { name: "S0 정지 감지", ms: 300, c: "var(--line-strong)" },
+    { name: "전처리 S1–S14", ms: 11, c: "var(--primary)" },
+    { name: "재촬영 여유", ms: 40, c: "color-mix(in srgb, var(--tertiary) 55%, transparent)" },
+    { name: "추론", ms: 30, c: "var(--secondary)" },
+    { name: "판정·전송", ms: 5, c: "var(--fg)" }
+  ];
+  var bar = document.getElementById("budgetBar"), legend = document.getElementById("budgetLegend");
+  budget.forEach(function (s, i) {
+    var d = document.createElement("div");
+    d.style.width = (s.ms / 500 * 100) + "%";
+    d.style.background = s.c;
+    d.style.animationDelay = (i * 0.12) + "s";
+    d.title = s.name + " " + s.ms + "ms";
+    bar.appendChild(d);
+    var l = document.createElement("span");
+    l.innerHTML = '<i style="background:' + s.c + '"></i>' + s.name + ' <span class="mono">' + s.ms + "ms</span>";
+    legend.appendChild(l);
+  });
+
+  // ── 후처리 판정 시뮬레이터 (PRD·설계서 규칙) ──
+  var names = { plastic: "플라스틱", can: "캔", paper: "종이", etc: "기타" };
+  var f = {
+    cls: document.getElementById("simClass"), prob: document.getElementById("simProb"),
+    flag: document.getElementById("simFlag"), metal: document.getElementById("simMetal")
+  };
+  function decide() {
+    var p = parseFloat(f.prob.value), flag = f.flag.value, metal = f.metal.checked;
+    document.getElementById("simProbOut").textContent = p.toFixed(2);
+    var th = (flag === "edge_fallback" || flag === "blurry") ? 0.7 : 0.6;
+    var bin, hit = [], chip;
+    if (flag === "no_object" || flag === "multi_object") { bin = "review"; hit = ["err"]; }
+    else if (metal) { bin = "can"; hit = ["metal"]; }
+    else {
+      if (th > 0.6) hit.push("raise");
+      if (p < th) { bin = "review"; hit.push("low"); } else { bin = f.cls.value; hit.push("pass"); }
+    }
+    var out = document.getElementById("simOut"), c = document.getElementById("simChip");
+    if (bin === "review") {
+      out.textContent = "확인 필요"; out.style.color = "var(--tertiary)";
+      c.className = "chip warn"; c.textContent = "버튼 선택 → 라벨 저장";
+    } else {
+      out.textContent = names[bin]; out.style.color = "var(--primary)";
+      c.className = "chip ok"; c.textContent = metal ? "금속 감지로 확정" : "확정 · 임계 " + th.toFixed(1);
+    }
+    document.querySelectorAll("#simBins div").forEach(function (d) {
+      d.className = d.dataset.bin === bin ? ("on" + (bin === "review" ? " warn" : "")) : "";
+    });
+    document.querySelectorAll("#simRules li").forEach(function (li) {
+      li.className = hit.indexOf(li.dataset.r) >= 0 ? "hit" : "";
+    });
+  }
+  ["input", "change"].forEach(function (ev) {
+    Object.keys(f).forEach(function (k) { f[k].addEventListener(ev, decide); });
+  });
+  decide();
+})();
+</script>
 
 </body>
 </html>

@@ -6,6 +6,8 @@
   3) 같은 전처리 적용: EcoPreprocessor.process(frame, 256)  (학습-추론 동일: 원칙 P5)
   4) 목록 기록      : data/processed/index_public.csv
 """
+from __future__ import annotations
+
 import csv
 import json
 from pathlib import Path
@@ -14,7 +16,7 @@ import cv2
 import numpy as np
 
 from .config import (BACKGROUND_DIR, CUTOUT_DIR, DATA_DIR, DROP_ZONE, OBJ_SIZE_RANGE, PROCESSED_DIR,
-                     TACO_MAP, TRAIN_SIZE)
+                     TACO_MAP, TRAIN_SIZE, list_images)
 from .preprocess import EcoPreprocessor
 from .compose import composite, reinhard_match, rotate_bgra, scale_to_long_side
 
@@ -82,7 +84,7 @@ def cutouts_from_class_folders(src: Path, mapping: dict, source: str, limit_per_
             continue
         out = CUTOUT_DIR / source / label
         out.mkdir(parents=True, exist_ok=True)
-        files = sorted(cls_dir.glob("*.jpg")) + sorted(cls_dir.glob("*.png"))
+        files = list_images(cls_dir)
         files = files[:limit_per_class] if limit_per_class else files
         per_dir[cls_dir.name] = (label, len(jobs), len(jobs) + len(files))
         jobs += [(f, out / f"{cls_dir.name}_{f.stem}.png") for f in files]
@@ -159,9 +161,13 @@ def own_color_stats(pre: EcoPreprocessor) -> dict:
 def build_public_processed(pre: EcoPreprocessor, per_cutout: int = 1, color_match: bool = False, seed: int = 0):
     """오려낸 물체를 배경에 합성 → 전처리 → data/processed/public/<label>/ 저장 + 목록 작성."""
     rng = np.random.default_rng(seed)
-    bgs = [cv2.imread(str(p)) for p in sorted(BACKGROUND_DIR.glob("*.jpg"))]
+    bgs = [cv2.imread(str(p)) for p in list_images(BACKGROUND_DIR)]
     H, W = bgs[0].shape[:2]
     stats = own_color_stats(pre) if color_match else {}
+    if color_match and not stats:
+        print("  [색 맞춤] 자체 촬영 전처리 결과가 없어 건너뜀 → 'own'을 먼저 실행하세요.")
+    if not CUTOUT_DIR.exists():
+        raise FileNotFoundError(f"오려낸 물체가 없습니다: {CUTOUT_DIR} → --trashnet / --taco / --folder 중 하나를 지정하세요.")
     rows, failed = [], 0
     for src_dir in sorted(p for p in CUTOUT_DIR.iterdir() if p.is_dir()):
         source = src_dir.name

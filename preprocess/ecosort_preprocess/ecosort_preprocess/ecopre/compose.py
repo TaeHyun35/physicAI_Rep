@@ -4,6 +4,8 @@
 공개 데이터에서 오려낸 물체(BGRA)를 빈 라이트박스 배경 위에 붙여,
 '에코소트 장치가 찍은 것 같은' 프레임을 만든다. 데모용 가상 데이터 생성에도 같은 함수를 쓴다.
 """
+from __future__ import annotations
+
 import cv2
 import numpy as np
 

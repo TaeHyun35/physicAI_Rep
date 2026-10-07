@@ -46,6 +46,7 @@ flowchart TD
 ```
 ecosort_preprocess/
 ├── run_preprocess.py        # 실행 명령 모음 (여기서 시작)
+├── ecosort_colab.ipynb      # Google Colab 실행 노트북 (Drive 연동)
 ├── requirements.txt
 └── ecopre/
     ├── config.py            # 경로, 클래스, 공개 데이터 매핑, 전처리 파라미터(PreConfig)
@@ -53,10 +54,10 @@ ecosort_preprocess/
     ├── augment.py           # 학습용 증강 (기하 변환 먼저, 색 변화 나중)
     ├── compose.py           # 오려낸 물체를 배경에 합성, 색 맞춤
     ├── download.py          # TrashNet, TACO 다운로드
-    ├── prepare_own.py       # 자체 촬영 데이터 전처리 + 흐림 기준 자동 설정
+    ├── prepare_own.py       # 자체 촬영 데이터 점검(check) + 전처리 + 흐림 기준 자동 설정
     ├── prepare_public.py    # 공개 데이터 오려내기 → 합성 → 전처리
     ├── manifest.py          # 학습/검증/테스트 분할 (물체 ID 단위)
-    └── debug_tools.py       # 시각화, 처리 시간 측정, 파라미터 비교
+    └── debug_tools.py       # 시각화, 처리 시간 측정, 파라미터 비교, 배경 점검(bgcheck)
 ```
 
 실행하면 아래 데이터 폴더가 만들어집니다.
@@ -78,23 +79,37 @@ data/
 pip install -r requirements.txt
 ```
 
-Jetson에서는 JetPack에 포함된 OpenCV를 그대로 써도 됩니다.
+Python 3.8 이상에서 동작합니다 (JetPack 5의 Python 3.8, Colab 포함). Jetson에서는 JetPack에 포함된 OpenCV를 그대로 써도 됩니다.
+
+### Google Colab에서 실행
+
+`ecosort_colab.ipynb`를 Colab에서 열고 위에서부터 실행합니다. Drive의 `MyDrive/ecosort/ecosort_preprocess`를 `/content`로 복사해 작업하고(Drive에서 직접 돌리면 작은 파일 입출력이 매우 느림), 결과는 `data_out.zip`으로 묶어 Drive에 되돌려 둡니다.
+
+| Colab에서 | Jetson에서만 |
+|---|---|
+| 다운로드, 오려내기, 합성, `own`, `manifest`, `visualize`, `sweep`, 학습, ONNX 내보내기 | 처리 시간 실측(`benchmark`, H-03), TensorRT 엔진 빌드, 카메라 제어 |
+
+`data/pre_config.json`은 학습과 장치가 같이 써야 하므로(원칙 P5) Colab 결과에서 꺼내 Jetson에 반드시 복사합니다.
 
 ## 4. 데이터 준비 규칙
 
-**배경:** 장치와 같은 카메라 설정(노출·화이트밸런스·초점 수동 고정)으로 빈 라이트박스를 10장 찍어 `data/backgrounds/`에 넣습니다. 물체 사진과 해상도가 같아야 합니다.
+**배경:** 장치와 같은 카메라 설정(노출·화이트밸런스·초점 수동 고정)으로 빈 라이트박스를 10장 찍어 `data/backgrounds/`에 넣습니다. 물체 사진과 해상도가 같아야 합니다. `public`(공개 데이터 합성)도 이 배경을 쓰므로, 실제 라이트박스 배경이 생기기 전에는 `download`와 오려내기까지만 의미가 있습니다.
 
 **자체 촬영 파일명:** `클래스_품목_물체ID_조건_번호.jpg`
 
 | 부분 | 예시 | 설명 |
 |---|---|---|
-| 클래스 | plastic | plastic / can / paper / etc |
+| 클래스 | plastic | plastic / can / paper / etc. 헷갈리는 품목(`confuse` 폴더)도 **정답 클래스**를 씀 |
 | 품목 | petclear | 자유롭게 (밑줄 `_` 사용 금지) |
 | 물체ID | P0042 | 같은 물건이면 같은 ID. 학습/검증을 물체 단위로 나누는 기준 |
 | 조건 | L1-C0-S1-F | 조명(L1/L0)-청결(C0/C1)-형태(S0/S1)-시점(F/S) |
 | 번호 | 0001 | |
 
 폴더가 곧 용도입니다. `train_pool`은 학습·검증, `test`는 고정 테스트셋(학습과 다른 물건만), `confuse`는 헷갈리는 품목 세트입니다.
+
+- 확장자는 `.jpg/.jpeg/.png`, 대소문자를 구분하지 않습니다.
+- 금속 감지 값과 무게는 같은 이름의 `.txt`로 함께 둡니다.
+- 촬영 순서·물건 수 목표·조건 배분은 `docs/에코소트_현장조사_체크리스트.md`(개인 진행판)의 샘플 이미지 수집 지침을 따릅니다.
 
 ## 5. 실행 순서
 
@@ -104,11 +119,12 @@ python run_preprocess.py download trashnet        # 약 43MB, 2,527장
 python run_preprocess.py download taco --max-images 100   # 선택. 이미지는 Flickr에서 받음
 python run_preprocess.py download aihub           # 수동 다운로드 안내 출력
 
-# 2) 자체 촬영 데이터 전처리 (흐림 기준값도 자동으로 정해 data/pre_config.json에 저장)
-python run_preprocess.py own
+# 2) 자체 촬영 데이터 점검 → 전처리 (흐림 기준값도 자동으로 정해 data/pre_config.json에 저장)
+python run_preprocess.py check        # 파일명 규칙·물건 수/사진 수·평가 누수·조건 분포 (배경 없이 가능)
+python run_preprocess.py own          # check 결과를 먼저 출력한 뒤 전처리
 
 # 3) 공개 데이터: 오려내기 → 배경 합성 → 같은 전처리
-python run_preprocess.py public --trashnet --per-cutout 2
+python run_preprocess.py public --trashnet --per-cutout 2 --color-match   # 색 맞춤은 own 이후에만
 python run_preprocess.py public --taco                       # TACO를 받았다면
 python run_preprocess.py public --folder data/raw/public/aihub --map aihub_map.json
 
@@ -122,6 +138,9 @@ python run_preprocess.py all --trashnet
 ## 6. 점검 도구
 
 ```bash
+# 빈 배경 점검: 평균 밝기(목표 200~220), 모서리/중앙 비율(D-01), 포화(D-03), 해상도 혼재(H-02)
+python run_preprocess.py bgcheck data/backgrounds
+
 # 단계별 시각화 → debug/viz_<파일명>.jpg
 python run_preprocess.py visualize data/raw/own/train_pool --limit 5
 

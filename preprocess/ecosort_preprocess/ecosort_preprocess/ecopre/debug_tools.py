@@ -4,7 +4,10 @@
   visualize : 한 장의 프레임이 S1~S14를 거치며 어떻게 바뀌는지 한 장의 그림으로 저장
   benchmark : 폴더 전체를 처리해 단계별 시간(H-03), 실패 원인, 플래그 비율을 표로 출력
   sweep     : 파라미터 하나를 여러 값으로 바꿔 가며 결과 비교 (실험 E1, E2 등)
+  bg_check  : 빈 배경 사진의 밝기·조명 균일도·포화 비율 측정 (체크리스트 A-02, D-01, D-03)
 """
+from __future__ import annotations
+
 import time
 from collections import Counter, defaultdict
 from dataclasses import replace
@@ -14,13 +17,13 @@ import cv2
 import numpy as np
 
 from .augment import augment
-from .config import DEBUG_DIR, MODEL_SIZE, TRAIN_SIZE
+from .config import DEBUG_DIR, MODEL_SIZE, TRAIN_SIZE, list_images
 from .preprocess import EcoPreprocessor, center_crop
 
 
 def _list_images(path: Path, limit: int | None = None) -> list:
     path = Path(path)
-    files = [path] if path.is_file() else sorted(p for p in path.rglob("*") if p.suffix.lower() in (".jpg", ".png"))
+    files = [path] if path.is_file() else list_images(path, recursive=True)
     return files[:limit] if limit else files
 
 
@@ -149,4 +152,50 @@ def sweep(pre: EcoPreprocessor, folder: Path, param: str, values: list, limit: i
         print(f"  {v:>8} {cnt['ok'] / n:7.1%} {cnt['no_object'] / n:7.1%} {cnt['multi_object'] / n:7.1%}"
               f" {cnt['edge_assist'] / n:8.1%} {cnt['edge_fallback'] / n:8.1%} {np.mean(t):7.2f}")
     pre.cfg = base_cfg
+    return rows
+
+
+# --------------------------------------------------------------------------- 4) 배경·조명 점검
+def bg_check(folder: Path, k: float = 0.1, sat_level: int = 250):
+    """
+    빈 라이트박스 사진마다 다음을 출력한다 (배경 사진만 있으면 되고, 캘리브레이션은 하지 않는다).
+      - 평균 밝기: 0단계 기준 200~220. 투입구 열림/닫힘, 낮/밤 사진을 비교하면 A-02(외부광), A-03 판단에 쓴다.
+      - 모서리/중앙 밝기 비율: D-01. 70% 미만이면 이득 맵보다 LED 배치 개선이 먼저다.
+      - 포화 픽셀 비율: D-03. 빈 배경에서 이미 포화가 있으면 노출을 낮춘다.
+      - 해상도: 배경·촬영 사진·장치 입력이 모두 같아야 한다 (H-02).
+    """
+    files = _list_images(folder)
+    if not files:
+        print(f"[bgcheck] 이미지가 없습니다: {folder}")
+        return []
+    print(f"\n[bgcheck] {folder}  ({len(files)}장)")
+    print(f"  {'파일':28s} {'해상도':>10s} {'평균':>6s} {'모서리/중앙':>10s} {'포화':>6s}  판정")
+    rows, shapes = [], set()
+    for f in files:
+        img = cv2.imread(str(f))
+        if img is None:
+            continue
+        g = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY).astype(np.float32)
+        h, w = g.shape
+        shapes.add((w, h))
+        bh, bw = max(1, int(h * k)), max(1, int(w * k))
+        center = g[h // 2 - bh // 2:h // 2 + bh // 2 + 1, w // 2 - bw // 2:w // 2 + bw // 2 + 1].mean()
+        corner = min(c.mean() for c in (g[:bh, :bw], g[:bh, -bw:], g[-bh:, :bw], g[-bh:, -bw:]))
+        ratio, mean = corner / max(center, 1.0), float(g.mean())
+        sat = float((img.max(axis=2) >= sat_level).mean())
+        notes = []
+        if not 200 <= mean <= 220:
+            notes.append("노출 조정(목표 200~220)")
+        if ratio < 0.7:
+            notes.append("모서리 어두움 → LED 배치(D-01)")
+        if sat > 0.001:
+            notes.append("빈 배경 포화 → 노출 하향(D-03)")
+        print(f"  {f.name[:28]:28s} {w:>5d}x{h:<4d} {mean:6.1f} {ratio:10.0%} {sat:6.2%}  {', '.join(notes) or 'OK'}")
+        rows.append({"file": f.name, "mean": mean, "corner_ratio": ratio, "saturated": sat})
+    if len(shapes) > 1:
+        print(f"  [경고] 해상도가 섞여 있습니다: {sorted(shapes)} → 모든 사진을 같은 해상도로 (H-02)")
+    if len(rows) > 1:
+        means = [r["mean"] for r in rows]
+        print(f"  사진 간 평균 밝기 차이: 최대 {max(means) - min(means):.1f}"
+              " (투입구 열림/닫힘·낮/밤 비교라면 A-02·A-03 근거, 같은 조건이면 3 이하가 정상)")
     return rows

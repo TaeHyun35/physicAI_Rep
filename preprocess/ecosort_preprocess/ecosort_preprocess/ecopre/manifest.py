@@ -8,6 +8,8 @@
 
 stage 열:  pretrain = 공개 데이터 (사전학습),  finetune = 자체·운영 데이터 (미세조정)
 """
+from __future__ import annotations
+
 import csv
 from collections import Counter, defaultdict
 

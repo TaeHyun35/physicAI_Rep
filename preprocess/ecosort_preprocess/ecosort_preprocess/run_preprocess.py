@@ -14,10 +14,14 @@
   (2~4를 한 번에: python run_preprocess.py all --trashnet)
 
 점검
+  python run_preprocess.py check                                                 # 촬영 파일명·물건 수·누수 점검
+  python run_preprocess.py bgcheck data/backgrounds                              # 배경 밝기·조명 균일도 (A-02, D-01)
   python run_preprocess.py visualize data/raw/own/train_pool/plastic_xxx.jpg   # 단계별 그림
   python run_preprocess.py benchmark data/raw/own/train_pool                     # 시간·실패율
   python run_preprocess.py sweep data/raw/own/train_pool --param thresh --values 12 20 30
 """
+from __future__ import annotations
+
 import argparse
 import json
 import shutil
@@ -40,7 +44,8 @@ def cmd_download(a):
 
 
 def cmd_own(a):
-    from ecopre.prepare_own import build_own_processed
+    from ecopre.prepare_own import audit_own, build_own_processed
+    audit_own()
     shutil.rmtree(PROCESSED_DIR / "own", ignore_errors=True)
     build_own_processed(load_pre())
 
@@ -75,6 +80,16 @@ def cmd_all(a):
     cmd_own(a)
     cmd_public(a)
     cmd_manifest(a)
+
+
+def cmd_check(a):
+    from ecopre.prepare_own import audit_own
+    audit_own()
+
+
+def cmd_bgcheck(a):
+    from ecopre.debug_tools import bg_check
+    bg_check(Path(a.folder))
 
 
 def cmd_visualize(a):
@@ -128,6 +143,13 @@ def build_parser():
     s = sub.add_parser("all", help="own → public → manifest 한 번에")
     public_args(s)
     s.set_defaults(fn=cmd_all)
+
+    s = sub.add_parser("check", help="자체 촬영 파일명·물건 수·평가 누수 점검 (배경 없이 가능)")
+    s.set_defaults(fn=cmd_check)
+
+    s = sub.add_parser("bgcheck", help="빈 배경 사진의 밝기·조명 균일도·포화 측정")
+    s.add_argument("folder", nargs="?", default=str(BACKGROUND_DIR))
+    s.set_defaults(fn=cmd_bgcheck)
 
     s = sub.add_parser("visualize", help="단계별 처리 결과 그림 저장 (debug/)")
     s.add_argument("path", help="이미지 파일 또는 폴더")

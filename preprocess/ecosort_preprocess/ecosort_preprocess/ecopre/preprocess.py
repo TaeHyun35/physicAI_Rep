@@ -7,6 +7,8 @@
   - 모델 입력 변환:       normalize(img)  (학습 Dataset과 장치 Classifier가 공통 사용)
   - 전처리 설정:          data/pre_config.json 을 학습과 장치가 함께 읽는다
 """
+from __future__ import annotations
+
 import json
 import time
 from dataclasses import asdict, dataclass, field
@@ -15,7 +17,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from .config import IMAGENET_MEAN, IMAGENET_STD, PRE_CONFIG_PATH, PreConfig
+from .config import IMAGENET_MEAN, IMAGENET_STD, PRE_CONFIG_PATH, PreConfig, list_images
 
 
 def load_pre_config() -> PreConfig:
@@ -36,7 +38,7 @@ class PreResult:
     """전처리 결과. image가 None이면 error에 이유가 들어 있다."""
     image: np.ndarray | None
     error: str | None = None            # light_error / no_object / multi_object
-    flags: list = field(default_factory=list)  # edge_fallback / blurry / saturated
+    flags: list = field(default_factory=list)  # edge_assist / edge_fallback / blurry / saturated
     box: tuple | None = None            # 원본 좌표 크롭 영역 (x0, y0, x1, y1)
     sharpness: float = 0.0              # S11 라플라시안 분산 (흐림 기준값 재설정에 사용)
 
@@ -96,9 +98,11 @@ class EcoPreprocessor:
     def from_dir(cls, bg_dir: Path, cfg: PreConfig | None = None) -> "EcoPreprocessor":
         """폴더의 배경 이미지(jpg/png)로 캘리브레이션. cfg가 없으면 저장된 설정(data/pre_config.json)을 쓴다."""
         cfg = cfg or load_pre_config()
-        files = sorted([p for p in Path(bg_dir).iterdir() if p.suffix.lower() in (".jpg", ".png")])
+        files = list_images(bg_dir)
         if not files:
-            raise FileNotFoundError(f"배경 이미지가 없습니다: {bg_dir}")
+            raise FileNotFoundError(
+                f"배경 이미지가 없습니다: {bg_dir}\n"
+                "  → 장치와 같은 카메라 설정·해상도로 빈 라이트박스를 10장 찍어 넣으세요 (체크리스트 샘플 지침 1).")
         return cls([cv2.imread(str(p)) for p in files], cfg)
 
     # ------------------------------------------------------------------ 내부 함수

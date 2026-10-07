@@ -5,6 +5,8 @@
 순서 원칙: 기하 변환(회전·반전·왜곡·크롭)을 먼저, 색·화질 변화를 나중에.
 입력: 전처리 결과 256x256 BGR  →  출력: 224x224 BGR (정규화는 preprocess.normalize에서)
 """
+from __future__ import annotations
+
 import cv2
 import numpy as np
 

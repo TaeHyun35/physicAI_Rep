@@ -3,10 +3,12 @@
 
   TrashNet : GitHub 저장소의 dataset-resized.zip (약 43MB, 6개 클래스 약 2,500장)
   TACO     : GitHub의 annotations.json + Flickr에 올라간 원본 이미지 (약 1,500장)
-  AI Hub   : 회원가입·승인이 필요해 자동 다운로드 불가 → 내려받은 뒤 public.py의 폴더 가져오기 사용
+  AI Hub   : 회원가입·승인이 필요해 자동 다운로드 불가 → 내려받은 뒤 'public --folder'로 가져오기
 
 ※ 사용 전 각 데이터셋의 라이선스를 반드시 확인하세요.
 """
+from __future__ import annotations
+
 import json
 import shutil
 import zipfile
@@ -96,5 +98,6 @@ def aihub_guide():
 1) https://aihub.or.kr 에서 회원가입 후 '생활 폐기물 이미지' 데이터 이용 신청
 2) 내려받은 이미지를 클래스별 폴더로 정리:  data/raw/public/aihub/<원본클래스명>/*.jpg
 3) 원본 클래스명 → 에코소트 클래스 매핑 JSON 작성 (예: {"페트병": "plastic", "캔류": "can"})
-4) python pipeline.py prepare-public --folder data/raw/public/aihub --map mapping.json
+4) python run_preprocess.py public --folder data/raw/public/aihub --map mapping.json
+※ 전체 용량이 크므로 필요한 품목만 골라 받는 것을 권장합니다 (Colab·Google Drive 용량 고려).
 """)
